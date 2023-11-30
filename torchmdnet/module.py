@@ -4,7 +4,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
 from torch.nn.functional import mse_loss, l1_loss
 
 from pytorch_lightning import LightningModule
-from torchmdnet.models.model import create_model, load_model
+from torchmdnet.models.model import create_model, load_model, get_peft_model 
 
 
 class LNNP(LightningModule):
@@ -16,8 +16,12 @@ class LNNP(LightningModule):
             self.model = load_model(self.hparams.load_model, args=self.hparams)
         elif self.hparams.pretrained_model:
             self.model = load_model(self.hparams.pretrained_model, args=self.hparams, mean=mean, std=std)
+            if self.hparams.peft:
+                self.model = get_peft_model(self.hparams.peft, model=self.model, args=self.hparams)
         else:
             self.model = create_model(self.hparams, prior_model, mean, std)
+
+
 
         # initialize exponential smoothing
         self.ema = None
