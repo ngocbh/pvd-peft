@@ -1,8 +1,8 @@
-from torchmdnet.tuners.ia3.model import IA3Model
+from torchmdnet.tuners.lora.model import LoraModel
 
 
-class TorchMD_Net_IA3(IA3Model):
-    def __init__(self, model, peft_config, adapter_name='ia3'):
+class TorchMD_Net_Lora(LoraModel):
+    def __init__(self, model, peft_config, adapter_name='lora'):
         super().__init__(model, peft_config, adapter_name)
         self.representation_model = self.model.representation_model
         self.output_model = self.model.output_model

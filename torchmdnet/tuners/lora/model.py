@@ -3,37 +3,49 @@ from abc import ABC, abstractmethod
 import torch
 from torch import nn
 
-from torchmdnet.ia3_tuners.utils import (
-    IA3Config, 
+from torchmdnet.tuners.utils import (
     get_submodules,
     check_target_module_exists,
 )
 
+from torchmdnet.tuners.lora.config import LoraConfig
 
-class Linear_IA3(nn.Module):
-    adapter_layer_names = ("ia3_l",)
+
+class Linear_Lora(nn.Module):
+    # All names of layers that may contain (trainable) adapter weights
+    adapter_layer_names = ("lora_A", "lora_B", "lora_embedding_A", "lora_embedding_B")
+    # All names of other parameters that may contain adapter-related parameters
+    other_param_names = ("r", "lora_alpha", "scaling", "lora_dropout")
 
     def __init__(
         self,
         base_layer: nn.Module,
         adapter_name: str,
-        is_feedforward: bool = False,
         fan_in_fan_out: bool = False,
         init_ia3_weights: bool = True,  # whether to initialize IA3 weights
     ):
         super().__init__()
         self.base_layer = base_layer
-        self.ia3_l = nn.ParameterDict({})
-        self.is_feedforward = is_feedforward
+        self.r = {}
+        self.lora_alpha = {}
+        self.scaling = {}
+        self.lora_dropout = nn.ModuleDict({})
+        self.lora_A = nn.ModuleDict({})
+        self.lora_B = nn.ModuleDict({})
+        # For Embedding layer
+        self.lora_embedding_A = nn.ParameterDict({})
+        self.lora_embedding_B = nn.ParameterDict({})
         self.adapter_name = adapter_name
+
         if isinstance(base_layer, nn.Linear):
             in_features, out_features = base_layer.in_features, base_layer.out_features
         else:
             raise ValueError('base_layer is not a nn.Linear')
+
         self.in_features = in_features
         self.out_features = out_features
         self.fan_in_fan_out = fan_in_fan_out
-        self.update_layer(adapter_name, init_ia3_weights)
+        # self.update_layer(adapter_name, init_ia3_weights)
 
     @property
     def weight(self) -> torch.Tensor:
@@ -86,8 +98,8 @@ class Linear_IA3(nn.Module):
         return result
 
 
-class IA3Model(nn.Module, ABC):
-    prefix = 'ia3_'
+class LoraModel(nn.Module, ABC):
+    prefix = 'lora_'
 
     def __init__(self, model, peft_config, adapter_name):
         super().__init__()
@@ -99,11 +111,9 @@ class IA3Model(nn.Module, ABC):
     def forward(self, *args: Any, **kwargs: Any):
         return self.model.forward(*args, **kwargs)
 
-    def _create_module(self, target, adapter_name, is_feedforward, init_ia3_weights):
-        new_module = Linear_IA3(target,
-                                adapter_name,
-                                is_feedforward=is_feedforward,
-                                init_ia3_weights=init_ia3_weights)
+    def _create_module(self, target, adapter_name):
+        new_module = Linear_Lora(target,
+                                adapter_name)
         return new_module
 
     def _replace_module(self, parent, child_name, new_module, child):
@@ -133,7 +143,7 @@ class IA3Model(nn.Module, ABC):
 
     def _create_and_replace(
         self,
-        peft_config: IA3Config,
+        peft_config: LoraConfig,
         adapter_name: str,
         target: nn.Module,
         target_name: str,

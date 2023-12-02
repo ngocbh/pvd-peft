@@ -35,7 +35,7 @@ lr_warmup_steps: 10000
 lr_cosine_length: 300000
 max_num_neighbors: 32
 max_z: 100
-model: equivariant-transformer-ia3
+model: equivariant-transformer
 neighbor_embedding: true
 ngpus: -1
 num_epochs: 3000
