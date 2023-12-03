@@ -44,7 +44,7 @@ def create_model(args, prior_model=None, mean=None, std=None):
             distance_influence=args["distance_influence"],
             **shared_args,
         )
-    elif args["model"] == "equivariant-transformer":
+    elif args["model"] in ["equivariant-transformer"]:
         from torchmdnet.models.torchmd_et import TorchMD_ET
 
         is_equivariant = True
@@ -90,19 +90,40 @@ def create_model(args, prior_model=None, mean=None, std=None):
             args["embedding_dimension"], args["activation"],
         )
         
+    # print("repr model: ", representation_model)
+    # print("output model: ", output_model)
     # combine representation and output network
     model = TorchMD_Net(
         representation_model,
         output_model,
         prior_model=prior_model,
+        output_model_noise=output_model_noise,
         reduce_op=args["reduce_op"],
         mean=mean,
         std=std,
         derivative=args["derivative"],
-        output_model_noise=output_model_noise,
         position_noise_scale=args['position_noise_scale'],
     )
     return model
+
+
+def get_peft_model(peft_type, model, args):
+    if peft_type == 'ia3':
+        from torchmdnet.models.torchmd_ia3 import TorchMD_Net_IA3
+        from torchmdnet.tuners.ia3.config import IA3Config
+
+        config = IA3Config(args)
+        ia3_model = TorchMD_Net_IA3(model, config)
+        return ia3_model
+    elif peft_type == 'lora':
+        from torchmdnet.models.torchmd_lora import TorchMD_Net_Lora
+        from torchmdnet.tuners.lora.config import LoraConfig
+
+        config = LoraConfig(args)
+        lora_model = TorchMD_Net_Lora(model, config)
+        return lora_model
+    else:
+        raise ValueError("Unknown pert_type")
 
 
 def load_model(filepath, args=None, device="cpu", mean=None, std=None, **kwargs):
