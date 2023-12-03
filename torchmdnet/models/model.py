@@ -55,6 +55,16 @@ def create_model(args, prior_model=None, mean=None, std=None):
             layernorm_on_vec=args["layernorm_on_vec"],
             **shared_args,
         )
+    elif args["model"] in ["visnet"]:
+        is_equivariant = True
+        from torchmdnet.models.torchmd_norm import TorchMD_Norm
+        representation_model = TorchMD_Norm(
+            attn_activation=args["attn_activation"],
+            num_heads=args["num_heads"],
+            distance_influence=args["distance_influence"],
+            layernorm_on_vec=args["layernorm_on_vec"],
+            **shared_args,
+        )
     else:
         raise ValueError(f'Unknown architecture: {args["model"]}')
 
