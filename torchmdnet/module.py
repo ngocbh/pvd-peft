@@ -18,8 +18,8 @@ class LNNP(LightningModule):
             self.model = load_model(self.hparams.pretrained_model, args=self.hparams, mean=mean, std=std)
             if self.hparams.peft:
                 self.model = get_peft_model(self.hparams.peft, model=self.model, args=self.hparams)
-            print(self.model)
-            raise ValueError
+            # print(self.model)
+            # raise ValueError
         else:
             self.model = create_model(self.hparams, prior_model, mean, std)
 

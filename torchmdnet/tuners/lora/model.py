@@ -1,6 +1,7 @@
-from typing import Any, List, Optional, Tuple
+from typing import Any, Union
 from abc import ABC, abstractmethod
 import torch
+import math
 from torch import nn
 
 from torchmdnet.tuners.utils import (
@@ -19,11 +20,15 @@ class Linear_Lora(nn.Module):
 
     def __init__(
         self,
-        base_layer: nn.Module,
+        base_layer,
         adapter_name: str,
-        fan_in_fan_out: bool = False,
-        init_ia3_weights: bool = True,  # whether to initialize IA3 weights
-    ):
+        r: int = 0,
+        lora_alpha: int = 1,
+        lora_dropout: float = 0.0,
+        fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+        init_lora_weights: Union[bool, str] = True,
+        **kwargs,
+    ) -> None:
         super().__init__()
         self.base_layer = base_layer
         self.r = {}
@@ -45,7 +50,7 @@ class Linear_Lora(nn.Module):
         self.in_features = in_features
         self.out_features = out_features
         self.fan_in_fan_out = fan_in_fan_out
-        # self.update_layer(adapter_name, init_ia3_weights)
+        self.update_layer(adapter_name, r, lora_alpha, lora_dropout, init_lora_weights)
 
     @property
     def weight(self) -> torch.Tensor:
@@ -62,40 +67,70 @@ class Linear_Lora(nn.Module):
     def bias(self) -> torch.Tensor:
         return self.base_layer.bias
 
-    def update_layer(self, adapter_name, init_ia3_weights):
-        # Actual trainable parameters
-        if self.is_feedforward:
-            weight = torch.randn((1, self.in_features))
+    def update_layer(self, adapter_name, r, lora_alpha, lora_dropout, init_lora_weights):
+        if r <= 0:
+            raise ValueError(f"`r` should be a positive integer value but the value passed is {r}")
+        self.r[adapter_name] = r
+        self.lora_alpha[adapter_name] = lora_alpha
+        if lora_dropout > 0.0:
+            lora_dropout_layer = nn.Dropout(p=lora_dropout)
         else:
-            weight = torch.randn((self.out_features, 1))
-        self.ia3_l[adapter_name] = nn.Parameter(weight)
-        if init_ia3_weights:
-            self.reset_ia3_parameters(adapter_name)
-        self.to(self.base_layer.weight.device)
+            lora_dropout_layer = nn.Identity()
 
-    def reset_ia3_parameters(self, adapter_name):
-        if adapter_name in self.ia3_l.keys():
-            # initialize learned vector with torch.ones
-            nn.init.constant_(self.ia3_l[adapter_name], 1.0)
+        self.lora_dropout.update(nn.ModuleDict({adapter_name: lora_dropout_layer}))
+        # Actual trainable parameters
+        if r > 0:
+            self.lora_A[adapter_name] = nn.Linear(self.in_features, r, bias=False)
+            self.lora_B[adapter_name] = nn.Linear(r, self.out_features, bias=False)
+            self.scaling[adapter_name] = lora_alpha / r
+
+        if init_lora_weights:
+            self.reset_lora_parameters(adapter_name, init_lora_weights)
+
+        weight = getattr(self.base_layer, "weight", None)
+        if weight is not None:
+            # the layer is already completely initialized, this is an update
+            if weight.dtype.is_floating_point or weight.dtype.is_complex:
+                self.to(weight.device, dtype=weight.dtype)
+            else:
+                self.to(weight.device)
+
+    def reset_lora_parameters(self, adapter_name, init_lora_weights):
+        if init_lora_weights is False:
+            return
+
+        if adapter_name in self.lora_A.keys():
+            if init_lora_weights is True:
+                # initialize A the same way as the default for nn.Linear and B to zero
+                # https://github.com/microsoft/LoRA/blob/a0a92e0f26c067cf94747bdbf1ce73793fa44d19/loralib/layers.py#L124
+                nn.init.kaiming_uniform_(self.lora_A[adapter_name].weight, a=math.sqrt(5))
+            elif init_lora_weights.lower() == "gaussian":
+                nn.init.normal_(self.lora_A[adapter_name].weight, std=1 / self.r[adapter_name])
+            else:
+                raise ValueError(f"Unknown initialization {init_lora_weights=}")
+            nn.init.zeros_(self.lora_B[adapter_name].weight)
+        if adapter_name in self.lora_embedding_A.keys():
+            # initialize a the same way as the default for nn.linear and b to zero
+            nn.init.zeros_(self.lora_embedding_A[adapter_name])
+            nn.init.normal_(self.lora_embedding_B[adapter_name])
 
     def forward(self, x: torch.Tensor, *args: Any, **kwargs: Any) -> torch.Tensor:
-        dtype = previous_dtype = x.dtype
+        previous_dtype = x.dtype
 
-        ia3_scaling = 1
-        ia3_scaling *= self.ia3_l[self.adapter_name].flatten()
-
-        if self.is_feedforward:
-            x = x.to(dtype)
-            # TODO: weight.dtype can be != self.ia3_l[self.active_adapters].dtype
-            # e.g. bf16 vs fp32. Is that okay?
-            interm = (x * ia3_scaling).to(self.base_layer.weight.dtype)
-            result = self.base_layer(interm, *args, **kwargs)
-        else:
-            result = self.base_layer(x, *args, **kwargs)
-            result = result.to(dtype) * ia3_scaling
+        result = self.base_layer(x, *args, **kwargs)
+        lora_A = self.lora_A[self.adapter_name]
+        lora_B = self.lora_B[self.adapter_name]
+        dropout = self.lora_dropout[self.adapter_name]
+        scaling = self.scaling[self.adapter_name]
+        x = x.to(lora_A.weight.dtype)
+        result += lora_B(lora_A(dropout(x))) * scaling
 
         result = result.to(previous_dtype)
         return result
+
+    def __repr__(self) -> str:
+        rep = super().__repr__()
+        return "lora." + rep
 
 
 class LoraModel(nn.Module, ABC):
@@ -111,9 +146,21 @@ class LoraModel(nn.Module, ABC):
     def forward(self, *args: Any, **kwargs: Any):
         return self.model.forward(*args, **kwargs)
 
-    def _create_module(self, target, adapter_name):
+    def _create_module(
+        self,
+        target,
+        adapter_name,
+        r,
+        lora_alpha,
+        lora_dropout,
+        init_lora_weights,
+    ):
         new_module = Linear_Lora(target,
-                                adapter_name)
+                                 adapter_name,
+                                 r=r,
+                                 lora_alpha=lora_alpha,
+                                 lora_dropout=lora_dropout,
+                                 init_lora_weights=init_lora_weights)
         return new_module
 
     def _replace_module(self, parent, child_name, new_module, child):
@@ -154,14 +201,30 @@ class LoraModel(nn.Module, ABC):
         if isinstance(target, torch.nn.Linear):
             new_module = self._create_module(target,
                                              adapter_name,
-                                             peft_config.is_feedforward,
-                                             peft_config.init_ia3_weights)
+                                             r=peft_config.r,
+                                             lora_alpha=peft_config.lora_alpha,
+                                             lora_dropout=peft_config.lora_dropout,
+                                             init_lora_weights=peft_config.init_lora_weights)
             self._replace_module(parent, target_name, new_module, target)
 
     def _mark_only_adapters_as_trainable(self, model) -> None:
-        for n, p in model.named_parameters():
+        for n, p in self.model.named_parameters():
             if self.prefix not in n:
                 p.requires_grad = False
+
+        bias = self.peft_config.bias
+        if bias == "all":
+            for n, p in self.model.named_parameters():
+                if "bias" in n:
+                    p.requires_grad = True
+        elif bias == "lora_only":
+            for m in self.model.modules():
+                if isinstance(m, Linear_Lora) and hasattr(m, "bias") and m.bias is not None:
+                    m.bias.requires_grad = True
+        elif bias == "none":
+            return
+        else:
+            raise NotImplementedError(f"Requested bias: {bias}, is not implemented.")
 
     def inject_adapter(self, model, adapter_name):
         peft_config = self.peft_config
@@ -169,7 +232,6 @@ class LoraModel(nn.Module, ABC):
         for key in key_list:
             if not check_target_module_exists(peft_config, key):
                 continue
-
             parent, target, target_name = get_submodules(model, key)
             optional_kwargs = {
                 "current_key": key,
