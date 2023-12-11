@@ -4,8 +4,8 @@ class LoraConfig:
         self.inference_mode = False
         self.bias = 'lora_only'
         self.r = 4
-        self.lora_alpha = 1.0
-        self.lora_dropout = 0.9
+        self.lora_alpha = 4.0
+        self.lora_dropout = 0.0
         self.init_lora_weights = True
         self.target_modules = [
             "k_proj",

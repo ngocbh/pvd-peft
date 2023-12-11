@@ -26,7 +26,7 @@ load_model: null
 pretrained_model: null
 peft: null
 log_dir: experiments/
-lr: 0.004
+lr: 0.0004
 lr_schedule: cosine
 lr_factor: 0.8
 lr_min: 1.0e-07
