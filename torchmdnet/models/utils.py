@@ -5,6 +5,21 @@ import torch.nn.functional as F
 from torch_geometric.nn import MessagePassing
 from torch_cluster import radius_graph
 
+def vec_layernorm(vec, norm):
+    dist = torch.norm(vec, dim=1, keepdim=True)
+    if (dist == 0).all():
+        return torch.zeros_like(vec)
+    tmp_dist = torch.where(dist == 0, torch.ones_like(dist), dist)
+    direct = vec / tmp_dist 
+    return F.relu(norm(dist)) * direct
+
+def max_min_norm(dist):
+    max_val, _ = torch.max(dist, dim=-1)
+    min_val, _ = torch.min(dist, dim=-1)
+    delta = (max_val - min_val).view(-1)
+    delta = torch.where(delta == 0, torch.ones_like(delta), delta)
+    dist = (dist - min_val.view(-1, 1, 1)) / delta.view(-1, 1, 1)
+    return dist
 
 def visualize_basis(basis_type, num_rbf=50, cutoff_lower=0, cutoff_upper=5):
     """
