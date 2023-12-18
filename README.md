@@ -1,14 +1,4 @@
-# Pre-training via Denoising for Molecular Property Prediction
-
-This is the official implementation for the paper:
-
-[Pre-training via Denoising for Molecular Property Prediction](https://arxiv.org/abs/2206.00133) (Spotlight @ ICLR 2023)
-
-by [Sheheryar Zaidi*](https://shehzaidi.github.io/), [Michael Schaarschmidt*](https://www.michaelschaarschmidt.com/), [James Martens](http://www.cs.toronto.edu/~jmartens/), [Hyunjik Kim](https://hyunjik11.github.io/), [Yee Whye Teh](http://www.stats.ox.ac.uk/~teh/), [Alvaro Sanchez Gonzalez](https://scholar.google.co.uk/citations?user=d1oQ8NcAAAAJ&hl=en), [Peter Battaglia](https://scholar.google.com/citations?user=nQ7Ij30AAAAJ&hl=en), [Razvan Pascanu](https://sites.google.com/corp/view/razp), [Jonathan Godwin](https://scholar.google.co.uk/citations?user=TEYiFIsAAAAJ&hl=en&oi=sra).
-
-Pre-training via denoising is a powerful representation learning technique for molecules. This repository contains an implementation of pre-training for the TorchMD-NET architecture, built off the [original TorchMD-NET repository](https://github.com/torchmd/torchmd-net).
-
-<img src="./assets/pvd.gif" alt="drawing" width="500"/>
+# Pretraining and Fine-Tuning for Equivariant Graph Neural Network on Molecular Datasets
 
 ## How to use this code
 
@@ -16,13 +6,13 @@ Pre-training via denoising is a powerful representation learning technique for m
 
 Clone the repository:
 ```
-git clone https://github.com/shehzaidi/pre-training-via-denoising.git
-cd pre-training-via-denoising
+git clone https://github.com/ngocbh/pvd-peft
+cd pvd-peft
 ```
 
 Create a virtual environment containing the dependencies and activate it:
 ```
-conda env create -f environment.yml
+conda env create -f environment.yml -n pvd
 conda activate pvd
 ```
 
@@ -40,45 +30,20 @@ python scripts/train.py --conf examples/ET-PCQM4MV2.yaml --layernorm-on-vec whit
 
 The option `--layernorm-on-vec whitened` includes an optional equivariant whitening-based layer norm, which stabilizes denoising. The pre-trained model checkpoint will be in `./experiments/pretraining`. A pre-trained checkpoint is included in this repo at `checkpoints/denoised-pcqm4mv2.ckpt`.
 
-### Fine-tuning on QM9
+### Parameter-efficient Fine-tuning on QM9
 
-To fine-tune the model for HOMO/LUMO prediction on QM9, run the following command, specifying `homo`/`lumo` and the path to the pre-trained checkpoint:
+To parameter-efficient fine-tune (LoRA or IA3) the model for HOMO/LUMO prediction on QM9, run the following command:
 
 ```bash
-python scripts/train.py --conf examples/ET-QM9-FT.yaml --layernorm-on-vec whitened --job-id finetuning --dataset-arg <homo/lumo> --pretrained-model <path to checkpoint>
+python scripts/train.sh qm9_lora
+python scripts/train.sh qm9_ia3
 ```
-
-The fine-tuned model achieves state-of-the-art results for HOMO/LUMO on QM9:
-
-| **Target** | **Test MAE (meV)** |
-|------------|:------------------:|
-| HOMO       |        15.5        |
-| LUMO       |        13.2        |
-
 
 ### Data Parallelism 
 
-By default, the code will use all available GPUs to train the model. We used three GPUs for pre-training and two GPUs for fine-tuning (NVIDIA RTX 2080Ti), which can be set by prefixing the commands above with e.g. `CUDA_VISIBLE_DEVICES=0,1,2` to use three GPUs.
+By default, the code will use all available GPUs to train the model. We used single GPU (NVIDIA RTX 2080Ti) for fine-tuning.
 
-## Guide for implementing pre-training via denoising
+## Acknowledgement
 
-It is straightforward to implement denoising in an existing codebase. There are broadly three steps:
-
-1. Add noise to the input molecular structures in the dataset. See [here](https://github.com/shehzaidi/pre-training-via-denoising/blob/c545b76e0242d89e7f88a444c06e26cf7fd0d6c1/torchmdnet/data.py#L32).
-2. Add an output module to the architecture for predicting the noise. See [here](https://github.com/shehzaidi/pre-training-via-denoising/blob/c545b76e0242d89e7f88a444c06e26cf7fd0d6c1/torchmdnet/models/model.py#L146).
-3. Use (or augment an existing loss with) an L2 loss for training the model. See [here](https://github.com/shehzaidi/pre-training-via-denoising/blob/c545b76e0242d89e7f88a444c06e26cf7fd0d6c1/torchmdnet/module.py#L144).
-
-## Citation
-
-If you have found this work useful, please consider using the following citation:
-
-```bib
-@inproceedings{
-      zaidi2023pretraining,
-      title={Pre-training via Denoising for Molecular Property Prediction},
-      author={Sheheryar Zaidi and Michael Schaarschmidt and James Martens and Hyunjik Kim and Yee Whye Teh and Alvaro Sanchez-Gonzalez and Peter Battaglia and Razvan Pascanu and Jonathan Godwin},
-      booktitle={International Conference on Learning Representations},
-      year={2023},
-      url={https://openreview.net/forum?id=tYIMtogyee}
-}
-```
+This implementation relies on the following source code:
+- https://github.com/shehzaidi/pre-training-via-denoising
